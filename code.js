@@ -4,7 +4,7 @@ webpackChunkdiscord_app.pop();
 
 let modules = Object.values(wp.c);
 let find = p => modules.find(p)?.exports;
-let Q,R,C,D,http;
+let Q, R, C, D, http;
 
 if (find(x => x?.exports?.Z?.__proto__?.getStreamerActiveStreamMetadata)) {
   Q = find(x => x?.exports?.Z?.__proto__?.getQuest)?.Z;
@@ -27,23 +27,53 @@ if (find(x => x?.exports?.Z?.__proto__?.getStreamerActiveStreamMetadata)) {
   }
   window.__questSpoofActive = true;
 
+  // Priority: lower number = higher priority
+  const TASK_PRIORITY = {
+    PLAY_ACTIVITY: 1,
+    PLAY_ON_DESKTOP: 1,
+    STREAM_ON_DESKTOP: 1,
+    WATCH_VIDEO: 10,
+    WATCH_VIDEO_ON_MOBILE: 10,
+    // any other task type gets default 5
+  };
+
   try {
-    let quest = [...Q.quests.values()].find(q =>
-      q.userStatus?.enrolledAt && !q.userStatus?.completedAt &&
+    // Filter active quests that have at least one known task type
+    let availableQuests = [...Q.quests.values()].filter(q =>
+      q.userStatus?.enrolledAt &&
+      !q.userStatus?.completedAt &&
       new Date(q.config.expiresAt) > Date.now() &&
-      ['WATCH_VIDEO','PLAY_ON_DESKTOP','STREAM_ON_DESKTOP','PLAY_ACTIVITY','WATCH_VIDEO_ON_MOBILE']
+      ['WATCH_VIDEO', 'PLAY_ON_DESKTOP', 'STREAM_ON_DESKTOP', 'PLAY_ACTIVITY', 'WATCH_VIDEO_ON_MOBILE']
         .some(t => (q.config.taskConfig ?? q.config.taskConfigV2).tasks[t])
     );
-    if (!quest) {
+
+    if (availableQuests.length === 0) {
       console.log('No active quest');
       window.__questSpoofActive = false;
       return;
     }
 
+    // Sort quests by the highest priority task they contain (lower number first)
+    availableQuests.sort((a, b) => {
+      const tasksA = (a.config.taskConfig ?? a.config.taskConfigV2).tasks;
+      const tasksB = (b.config.taskConfig ?? b.config.taskConfigV2).tasks;
+      const priorityA = Math.min(...Object.keys(tasksA).map(t => TASK_PRIORITY[t] ?? 5));
+      const priorityB = Math.min(...Object.keys(tasksB).map(t => TASK_PRIORITY[t] ?? 5));
+      return priorityA - priorityB;
+    });
+
+    let quest = availableQuests[0]; // highest priority quest
+
     console.log(`🎯 Quest: ${quest.config.messages.questName}`);
     let taskCfg = quest.config.taskConfig ?? quest.config.taskConfigV2;
-    let task = Object.keys(taskCfg.tasks).find(t => t in taskCfg.tasks);
-    let need = taskCfg.tasks[task].target;
+    let tasks = taskCfg.tasks;
+
+    // Pick the highest priority task inside this quest
+    let taskKeys = Object.keys(tasks);
+    taskKeys.sort((a, b) => (TASK_PRIORITY[a] ?? 5) - (TASK_PRIORITY[b] ?? 5));
+    let task = taskKeys[0]; // most important task
+
+    let need = tasks[task].target;
     let done = quest.userStatus?.progress?.[task]?.value || 0;
     if (done >= need) {
       console.log('✅ Already completed');
@@ -86,13 +116,13 @@ if (find(x => x?.exports?.Z?.__proto__?.getStreamerActiveStreamMetadata)) {
         let app = appList[0];
         if (!app) throw new Error('Application not found');
 
-        let exe = app.executables?.find(x => x.os === 'win32')?.name?.replace('>','') || app.name + '.exe';
+        let exe = app.executables?.find(x => x.os === 'win32')?.name?.replace('>', '') || app.name + '.exe';
         let fake = {
           cmdLine: `"C:\\Program Files\\${app.name}\\${exe}"`, exeName: exe,
           exePath: `C:\\Program Files\\${app.name}\\${exe}`, hidden: false,
           isLauncher: false, id: app.id, name: app.name,
           pid: 1000 + Math.floor(Math.random() * 30000), pidPath: [],
-          processName: exe.replace('.exe',''), start: Date.now() - 60000,
+          processName: exe.replace('.exe', ''), start: Date.now() - 60000,
           focused: true, lastFocused: Date.now(),
           windowHandle: { value: 10000 + Math.floor(Math.random() * 90000) },
           windowTitle: app.name, platform: 'win32', type: 0
